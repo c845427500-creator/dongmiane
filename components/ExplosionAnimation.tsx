@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const EMOJIS = ["💥", "🎉", "✨", "🔥", "💣", "⚡", "🌟", "🎆", "💫", "🪄"];
@@ -29,6 +29,8 @@ export default function ExplosionAnimation({
 }) {
   const [particles, setParticles] = useState<Particle[]>([]);
   const [visible, setVisible] = useState(false);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     if (!show) {
@@ -57,11 +59,11 @@ export default function ExplosionAnimation({
     setParticles(particles);
 
     const timer = setTimeout(() => {
-      onComplete?.();
+      onCompleteRef.current?.();
     }, 2500);
 
     return () => clearTimeout(timer);
-  }, [show, onComplete]);
+  }, [show]);
 
   return (
     <AnimatePresence>

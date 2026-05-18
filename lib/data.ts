@@ -4,7 +4,25 @@ export interface Worry {
   keywords?: string[];
 }
 
+// BBSI Dimension Score
+export interface BBSIDimensionScore {
+  score: number;
+  evidence?: string;
+  bars_match?: string;
+}
+
+// STAR Assessment
+export interface StarAssessment {
+  has_situation: boolean;
+  has_task: boolean;
+  has_action: boolean;
+  has_result: boolean;
+  completeness: string;
+  star_constraint_applied: string;
+}
+
 export interface TestResult {
+  // Legacy fields (kept for backwards compat)
   score: number;
   logic: number;
   content: number;
@@ -12,6 +30,22 @@ export interface TestResult {
   comment: string;
   truth?: string;
   mechanism?: string;
+  // BBSI 4-dimension fields
+  dimensions?: {
+    logical_thinking: BBSIDimensionScore;
+    problem_solving: BBSIDimensionScore;
+    communication_collaboration: BBSIDimensionScore;
+    value_alignment: BBSIDimensionScore;
+  };
+  star_assessment?: StarAssessment;
+  total_score?: number;
+  tencent_fit?: string;
+  improvement_suggestions?: string[];
+  // Follow-up answers
+  followup_answers?: string[];
+  // Original answer and followup Q&A pairs for AI personalization
+  original_answer?: string;
+  followup_qa_pairs?: { question: string; answer: string }[];
 }
 
 export interface RoundState {
@@ -288,12 +322,158 @@ export function getKeywordFrequencies(worries: Worry[]): [string, number][] {
   return Object.entries(counter).sort((a, b) => b[1] - a[1]);
 }
 
+// Generic emoji pool for locally generated black boxes
+const LOCAL_EMOJI_POOL = ["🤔", "💭", "🔮", "🎯", "🧩", "💡", "⚡", "🌟", "🎪", "🪄"];
+
+// Short keyword extraction from arbitrary worry text (2-4 chars)
+function pickKeyword(text: string): string {
+  // Remove common stop words and pick meaningful characters
+  const cleaned = text
+    .replace(/[？?！!，。、\s\d]/g, "")
+    .replace(/AI/g, "")
+    .replace(/面试/g, "")
+    .replace(/会不会/g, "")
+    .replace(/怎么办/g, "")
+    .replace(/怎么/g, "")
+    .replace(/什么/g, "")
+    .replace(/为什么/g, "")
+    .replace(/我觉得/g, "")
+    .replace(/我的/g, "")
+    .replace(/是不是/g, "")
+    .replace(/有没有/g, "");
+  if (cleaned.length >= 2 && cleaned.length <= 4) return cleaned;
+  if (cleaned.length > 4) return cleaned.slice(0, 4);
+  // Fallback: use a meaningful word from the text
+  const fallback = text.replace(/[？?！!，。,.\s]/g, "");
+  return fallback.slice(0, 4) || "面试";
+}
+
+// Generate a question from the worry
+function pickQuestion(worry: string): string {
+  // Try to rephrase the worry as a question
+  const q = worry
+    .replace(/我/g, "候选人")
+    .replace(/吗[？?]?$/, "？")
+    .replace(/[。.]$/, "");
+  if (q.endsWith("？")) return q;
+  if (q.length < 30) return q + "？";
+  return `AI 面试中，${q.slice(0, 30)}…？`;
+}
+
+const PRO_OPTION_TEMPLATES = [
+  "不会，AI 主要评估回答内容本身",
+  "AI 面试在这方面比人类更公平",
+  "目前行业正在解决这个问题",
+  "技术本身是中立的，关键看怎么用",
+];
+
+const CON_OPTION_TEMPLATES = [
+  "会，AI 系统目前还不够完善",
+  "确实存在这样的风险",
+  "不同公司的 AI 系统差异很大",
+  "现阶段还无法完全避免",
+];
+
+function pickEmoji(text: string): string {
+  const map: [RegExp, string][] = [
+    [/公平|平等|歧视|偏见/, "⚖️"],
+    [/隐私|泄露|安全|数据/, "🔒"],
+    [/紧张|焦虑|压力|害怕/, "😰"],
+    [/能力|技能|水平|考核/, "💪"],
+    [/打分|评分|评估/, "📊"],
+    [/作弊|监控|摄像头|录音/, "👀"],
+    [/时间|速度|快慢/, "⏱️"],
+    [/公平|申诉|复核/, "📢"],
+    [/性格|内向|外向/, "😶"],
+    [/学历|学校|985|211|双非/, "🎓"],
+  ];
+  for (const [re, emoji] of map) {
+    if (re.test(text)) return emoji;
+  }
+  return LOCAL_EMOJI_POOL[Math.floor(Math.random() * LOCAL_EMOJI_POOL.length)];
+}
+
+/** Generate a local template-based black box without AI — ensures every worry creates a box */
+export function generateLocalBlackBox(worry: string): BlackBox {
+  const keyword = pickKeyword(worry);
+  const question = pickQuestion(worry);
+  const emoji = pickEmoji(worry);
+
+  const options = [
+    PRO_OPTION_TEMPLATES[Math.floor(Math.random() * PRO_OPTION_TEMPLATES.length)],
+    CON_OPTION_TEMPLATES[Math.floor(Math.random() * CON_OPTION_TEMPLATES.length)],
+    "视具体场景而定，不能一概而论",
+    "目前的共识是业界正在改善这一点",
+  ];
+
+  const correct = 2; // The nuanced "depends" answer is usually the truest
+  const optionLean = ["pro", "con", "neutral", "neutral"];
+
+  const truth = `${question.replace(/？$/, "")}。AI 面试系统的主流设计会尽量消除无关信号的干扰，专注于评估回答中的能力维度。但技术永远在迭代中，保持关注和主动了解就是最好的应对。`;
+
+  const testQuestion = `请描述一次你与这个问题相关的经历或看法（限200字）。AI 将从逻辑结构、内容深度和表达清晰度三个维度进行评分。\n\n🔬 实验目的：验证 AI 面试评分是否真正关注内容本身，而非表面信号。`;
+
+  const testConclusion = "本次评分仅基于你回答中的：①逻辑结构清晰度 ②能力关键词匹配 ③书面表达流畅度。无关变量未被纳入评分模型。";
+
+  return {
+    keyword,
+    question,
+    emoji,
+    options,
+    correct,
+    optionLean,
+    truth,
+    proStance: `AI 通过统一标准减少人为偏见，让评估更客观`,
+    conStance: `AI 面试的算法和训练数据可能存在隐性局限`,
+    testQuestion,
+    testConclusion,
+    freq: 0,
+  };
+}
+
+// Similar topic groups for deduplication — only one box per group
+const SIMILAR_GROUPS: string[][] = [
+  ["歧视", "双非", "偏见"],
+  ["公平", "透明"],
+  ["紧张", "内向"],
+  ["长相", "偏见"],
+  ["算法", "透明"],
+];
+
+function resolveSimilar(keywords: [string, number][]): [string, number][] {
+  const usedGroups = new Set<number>();
+  const result: [string, number][] = [];
+  for (const [kw, freq] of keywords) {
+    const groupIdx = SIMILAR_GROUPS.findIndex((g) => g.includes(kw));
+    if (groupIdx >= 0) {
+      if (usedGroups.has(groupIdx)) continue;
+      usedGroups.add(groupIdx);
+    }
+    result.push([kw, freq]);
+  }
+  return result;
+}
+
+export function isSimilarToAny(keyword: string, existingKeywords: string[]): boolean {
+  if (existingKeywords.includes(keyword)) return true;
+  for (const group of SIMILAR_GROUPS) {
+    if (group.includes(keyword)) {
+      for (const ek of existingKeywords) {
+        if (group.includes(ek)) return true;
+      }
+      break;
+    }
+  }
+  return false;
+}
+
 export function getActiveBoxes(
   keywords: [string, number][]
 ): BlackBox[] {
+  const deduped = resolveSimilar(keywords);
   const seen = new Set<string>();
   const boxes: BlackBox[] = [];
-  for (const [kw, freq] of keywords) {
+  for (const [kw, freq] of deduped) {
     if (BLACK_BOX_BANK[kw] && !seen.has(kw)) {
       seen.add(kw);
       const info = BLACK_BOX_BANK[kw];
